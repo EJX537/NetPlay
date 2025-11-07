@@ -97,7 +97,9 @@ def is_dungeon_feature(glyphs: np.array) -> np.array:
     return np.isin(glyphs, FEATURES)
 
 def is_monster(glyphs: np.array) -> np.array:
-    return nh.glyph_is_monster(glyphs)
+    # nh.glyph_is_monster expects a scalar; use vectorized membership check for arrays
+    return np.isin(glyphs, MONSTERS)
 
 def is_object(glyphs: np.array) -> np.array:
-    return nh.glyph_is_object(glyphs)
+    # nh.glyph_is_object expects a scalar; vectorize using membership
+    return np.isin(glyphs, OBJECTS)

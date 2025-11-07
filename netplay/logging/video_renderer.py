@@ -1,5 +1,5 @@
 from netplay.nethack_utils.nle_wrapper import render_ascii_map
-from netplay.nethack_agent.tracking import BLStats
+from netplay.nethack_agent.tracking import make_blstats
 from netplay.nethack_agent.describe import describe_glyph
 
 from nle_language_wrapper.nle_language_obsv import NLELanguageObsv
@@ -40,7 +40,7 @@ class VideoWriter:
 
     def __enter__(self):
         return self
-    
+
     def __exit__(self, exc_type, exc_val, tb):
         self.close()
 
@@ -92,8 +92,13 @@ class AgentVideoRenderer:
         self.video_writer.write(frame)
 
         if self.render:
-            self._display_queue.put(frame[..., ::-1].copy())
-        
+            # Put a copy on the display queue for the display thread (if active)
+            try:
+                self._display_queue.put(frame[..., ::-1].copy())
+            except Exception:
+                # If the display queue isn't available for some reason, continue silently.
+                pass
+
     def _render_topbar(self, width):
         action_history = self._render_action_history(math.floor(width*0.06))
         thought_history = self._render_thoughts(width - action_history.shape[1])
@@ -102,7 +107,7 @@ class AgentVideoRenderer:
             self._render_border(self._add_header(action_history, "Actions")),
             self._render_border(self._add_header(thought_history, "Agent Thoughts"))
         ], axis=1)
-    
+
     def _render_bottombar(self, width):
         height = self.font.size * len(self.last_obs['tty_chars'])
         tty = self._render_tty(self.last_obs, int(width * 0.4), height)
@@ -113,7 +118,7 @@ class AgentVideoRenderer:
             self._render_border(self._add_header(message_history, "Message History")),
             self._render_border(self._add_header(stats, "Stats"))
         ], axis=1)
-    
+
     def _render_inventory(self, height):
         width = 500
         vis = np.zeros((height, width, 3), dtype=np.uint8)
@@ -133,7 +138,7 @@ class AgentVideoRenderer:
 
         draw.multiline_text((0,0), "\n".join(lines), font=self.font, fill="white")
         return np.array(vis)
-    
+
     def _render_tty(self, obs, width, height):
         vis = render_ascii_map(obs["tty_chars"], self.font, is_ascii_map=True)
         vis = Image.fromarray(vis).resize((width, height), Image.LANCZOS)
@@ -142,7 +147,8 @@ class AgentVideoRenderer:
     def _render_stats(self, width, height):
         img = np.zeros((height, width, 3), dtype=np.uint8)
         img = Image.fromarray(img)
-        stats = BLStats(*self.last_obs["blstats"])
+        # Use tracking.make_blstats to handle different NLE blstats lengths
+        stats = make_blstats(self.last_obs["blstats"])
         agent_glyph = self.last_obs["glyphs"][stats.y, stats.x]
 
         hunger_lookup = {
@@ -180,7 +186,7 @@ class AgentVideoRenderer:
         draw.multiline_text((1, 1), txt, anchor="la", font=self.font, fill="white")
 
         return np.array(img)
-    
+
     def _render_action_history(self, width):
         key_presses = ["" if a is None else repr(chr(int(a))) for a in self.action_history]
         text = "\n".join(key_presses)
@@ -190,7 +196,7 @@ class AgentVideoRenderer:
 
         draw.multiline_text((img.width / 2, 1), text, font=self.font, fill="white", anchor="ma", spacing=4)
         return np.array(img)
-    
+
     def _render_game_messages(self, width, height):
         messages = ["" if a is None else a.replace('\n', '') for a in self.message_history]
         text = "\n".join(messages)
@@ -200,7 +206,7 @@ class AgentVideoRenderer:
 
         draw.multiline_text((1, 1), text, font=self.font, fill="white", spacing=4)
         return np.array(img)
-    
+
     def _render_thoughts(self, width):
         messages = [("", False) if a is None else (a, is_ai) for a, is_ai in self.thought_history]
 
@@ -213,19 +219,19 @@ class AgentVideoRenderer:
             y += self.font.size + 4
 
         #draw.multiline_text((1, 1), text, font=self.font, fill="white", spacing=4)
-        return np.array(img) 
+        return np.array(img)
 
     def _render_scene(self, obs):
         img = self.glyph_mapper.to_rgb(obs["glyphs"])
         return img
-    
+
     def _add_header(self, img: np.ndarray, text: str):
         header = np.zeros((self.header_height, img.shape[1], 3), dtype=img.dtype)
         header = Image.fromarray(header)
         draw = ImageDraw.Draw(header)
         draw.text((1, 1), text, font=self.header_font, fill="white", anchor="la")
         return np.concatenate([np.array(header), img], axis=0)
-    
+
     def _render_border(self, img: np.array, color=(90, 90, 90), thickness=1):
         img = Image.fromarray(img)
         draw = ImageDraw.Draw(img)
@@ -234,7 +240,19 @@ class AgentVideoRenderer:
         return np.array(img)
 
     def _display_thread(self):
-        cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL | cv2.WINDOW_GUI_NORMAL)
+        # Try to create a named window for interactive display. In headless or minimal
+        # OpenCV builds this can raise an error (no Qt/GTK support). Catch that and
+        # exit the display thread gracefully so the rest of the application keeps
+        # functioning (video writing will still work).
+        try:
+            cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL | cv2.WINDOW_GUI_NORMAL)
+        except Exception as e:
+            # Log a short warning and exit the display thread silently.
+            try:
+                print(f"Warning: Unable to initialize OpenCV display window: {e}")
+            except Exception:
+                pass
+            return
 
         last_size = (None, None)
         image = None

@@ -26,6 +26,22 @@ BLStats = namedtuple('BLStats',
                      'x y strength_percentage strength dexterity constitution intelligence wisdom charisma score hitpoints max_hitpoints depth gold energy max_energy armor_class monster_level experience_level experience_points time hunger_state carrying_capacity dungeon_number level_number prop_mask whatever')
 
 
+def make_blstats(seq):
+    """Create a BLStats namedtuple from a sequence coming from the environment.
+
+    Some NLE versions return 26 fields (alignment missing) while others return 27.
+    Pad with a sensible default (0) when the final field is absent so code can
+    rely on a consistent shape.
+    """
+    expected = len(BLStats._fields)
+    s = list(seq)
+    if len(s) == expected:
+        return BLStats(*s)
+    if len(s) == expected - 1:
+        return BLStats(*s, 0)
+    raise ValueError(f"Unexpected blstats length: {len(s)} (expected {expected} or {expected-1})")
+
+
 class Agent:
     def __init__(self, env, seed=0, verbose=False, panic_on_errors=False,
                  rl_model_to_train=None, rl_model_training_comm=(None, None)):
@@ -448,7 +464,8 @@ class Agent:
             self._previous_glyphs = self.last_observation['glyphs']
             self.last_observation = observation
 
-        self.blstats = BLStats(*self.last_observation['blstats'])
+    # Use local helper to construct BLStats in a backward-compatible way
+    self.blstats = make_blstats(self.last_observation['blstats'])
         self.glyphs = self.last_observation['glyphs']
 
         self.stats_logger.log_cumulative_value('max_turns_on_position',

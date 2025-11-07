@@ -18,6 +18,24 @@ LEVEL_HEIGHT = 21
 UNKNOWN_GLYPH_ID = -1
 
 BLStats = namedtuple('BLStats', 'x y strength_percentage strength dexterity constitution intelligence wisdom charisma score hitpoints max_hitpoints depth gold energy max_energy armor_class monster_level experience_level experience_points time hunger_state carrying_capacity dungeon_number level_number prop_mask alignment')
+
+
+def make_blstats(seq):
+    """Create a BLStats namedtuple from a sequence coming from the environment.
+
+    Different NLE versions provide either 26 or 27 blstats fields (the optional
+    'alignment' field may be missing). This helper pads the sequence with a
+    sensible default (0) when alignment is absent so the rest of the code can
+    rely on a consistent BLStats shape.
+    """
+    expected = len(BLStats._fields)
+    s = list(seq)
+    if len(s) == expected:
+        return BLStats(*s)
+    if len(s) == expected - 1:
+        # alignment missing — default to 0 (neutral)
+        return BLStats(*s, 0)
+    raise ValueError(f"Unexpected blstats length: {len(s)} (expected {expected} or {expected-1})")
 Position = namedtuple("Position", "x y")
 
 class NethackEvent:
@@ -64,7 +82,7 @@ class TeleportEvent(NethackEvent):
         start_x, start_y = self.start
         to_x, to_y = self.to
         return f"Teleported from ({start_x},{start_y}) to ({to_x},{to_y})"
-    
+
 @dataclass
 class StatChangeEvent(NethackEvent):
     stat: str
@@ -82,7 +100,7 @@ class StatChangeEvent(NethackEvent):
             return f"Lost {abs(diff)} {self.stat}"
 
         raise ValueError(f"Expected old_value {self.old_value} to be different from new_value {self.new_value}.")
-    
+
 @dataclass
 class LowHealthEvent(NethackEvent):
     def describe(self) -> str:
@@ -97,7 +115,7 @@ class NewGlyphEvent(NethackEvent):
         glyph_descr = describe_glyph(self.glyph)
         x, y = self.position
         return f"A {glyph_descr} appeared at ({x},{y})."
-    
+
 @dataclass
 class ItemEvent(NethackEvent):
     item_glyph: int
@@ -115,7 +133,7 @@ class RoomType(Enum):
 
     def __str__(self):
         return self.name
-    
+
     def __repr__(self):
         return self.name
 
@@ -132,15 +150,15 @@ class RoomData:
     def get_tiles(self) -> Generator[Tuple[int, int], None, None]:
         ys, xs = np.where(np.isin(self.room_map, [RoomData.INTERIOR, RoomData.EXIT]))
         return zip(xs, ys)
-    
+
     def get_interior_tiles(self) -> Generator[Tuple[int, int], None, None]:
         ys, xs = np.where(self.room_map == RoomData.INTERIOR)
         return zip(xs, ys)
-    
+
     def get_adjacent_tiles(self) -> Generator[Tuple[int, int], None, None]:
         ys, xs = np.where(self.room_map == RoomData.ADJACENT)
         return zip(xs, ys)
-    
+
     def get_exit_tiles(self) -> Generator[Tuple[int, int], None, None]:
         ys, xs = np.where(self.room_map == RoomData.EXIT)
         return zip(xs, ys)
@@ -153,21 +171,21 @@ class RoomData:
 
     def get_interior_mask(self):
         return self.room_map == RoomData.INTERIOR
-    
+
     def get_adjacent_mask(self):
         return self.room_map == RoomData.ADJACENT
-    
+
     def get_exit_mask(self):
         return self.room_map == RoomData.EXIT
-    
+
     def get_wall_glyphs(self):
         if self.type == RoomType.room:
             return G.WALLS
         elif self.type == RoomType.corridor:
             return G.ROCKS
-        
+
         raise ValueError(f"Unknown room type {self.type}.")
-    
+
 @dataclass
 class NewRoomEvent(NethackEvent):
     room_id: int
@@ -175,7 +193,7 @@ class NewRoomEvent(NethackEvent):
 
     def describe(self) -> str:
         return f"Found a new {self.room_type} with ID {self.room_id}"
-    
+
 @dataclass
 class MergedRoomsEvent(NethackEvent):
     new_room_id: int
@@ -215,11 +233,11 @@ class RoomGraph:
 
     def get_room_data(self, room_id) -> RoomData:
         return self.rooms.get(self.resolve_id(room_id))
-    
+
     def update(self, level: "Level", event_manager: EventManager) -> List[NethackEvent]:
         def overlap(old_room: RoomData, new_room: RoomData):
             return np.count_nonzero(old_room.get_room_mask() & new_room.get_room_mask())
-        
+
         new_graph = RoomGraph.from_level(level)
         new_to_old = {new_room_id : [] for new_room_id in new_graph.get_rooms()}
 
@@ -248,7 +266,7 @@ class RoomGraph:
                 new_id = self.next_room_id
                 self.next_room_id += 1
                 self.rooms[new_id] = new_room
-                
+
                 # Handle recurrent id mapping, which could happen if we merge a room multiple times
                 past_ids = [old for old, new in self.old_id_mapping.items() if new in matching_old_room_ids]
                 # Update mapping
@@ -257,7 +275,7 @@ class RoomGraph:
 
     def resolve_id(self, room_id):
         return self.old_id_mapping.get(room_id, room_id)
-            
+
     @classmethod
     def from_level(cls, level: "Level"):
         graph = RoomGraph()
@@ -326,7 +344,7 @@ class RoomGraph:
 # This class is inspired by the same class in autoascend
 class Level:
     def __init__(self, dungeon_number, level_number, level_shape=(LEVEL_HEIGHT, LEVEL_WIDTH)):
-        # General information about this level 
+        # General information about this level
         self.dungeon_number = dungeon_number
         self.level_number = level_number
         self.shape = level_shape
@@ -362,7 +380,7 @@ class Level:
         # We do not know what feature is below an monster/object if there was stone there previously. As stone both represents stone and unknown features
         stone_feature_mask = self.features == G.SS.S_stone
         self.features[stone_feature_mask & (monster_mask | object_mask)] = UNKNOWN_GLYPH_ID
-        
+
         # Remove objects that we do not see anymore, but remember them if they are potentially blocked by monsters
         self.objects[object_mask] = glyphs[object_mask]
         self.objects[~object_mask & ~monster_mask] = UNKNOWN_GLYPH_ID
@@ -394,10 +412,10 @@ class Level:
 
     def get_monster_glyph(self, x, y) -> Optional[int]:
         return self.monsters[y,x] if self.monsters[y,x] != UNKNOWN_GLYPH_ID else None
-    
+
     def get_object_glyph(self, x, y) -> Optional[int]:
         return self.objects[y,x] if self.objects[y,x] != UNKNOWN_GLYPH_ID else None
-    
+
     def get_feature_glyph(self, x, y) -> Optional[int]:
         return self.features[y,x] if self.features[y,x] != UNKNOWN_GLYPH_ID else None
 
@@ -420,22 +438,28 @@ class Level:
         if treat_monster_unwalkable:
             # Treat monsters unwalkable, but pets are fine
             monster_mask = self.monsters != UNKNOWN_GLYPH_ID
-            pet_mask = glyph_is_pet(self.monsters)
+            # glyph_is_pet expects a scalar glyph; apply it only to seen monster positions
+            pet_mask = np.zeros(self.shape, dtype=bool)
+            ys, xs = np.where(monster_mask)
+            if ys.size > 0:
+                vals = self.monsters[ys, xs]
+                pet_flags = [glyph_is_pet(int(v)) for v in vals]
+                pet_mask[ys, xs] = pet_flags
             monster_mask[pet_mask] = False
             walkable_mask[monster_mask] = False
 
         return walkable_mask
-    
+
     def get_diagonal_walkable_mask(self, treat_boulder_unwalkable=True, treat_monster_unwalkable=False):
         walkable_diagonally = self.get_walkable_mask(treat_boulder_unwalkable=treat_boulder_unwalkable, treat_monster_unwalkable=treat_monster_unwalkable)
         # Doors do not allow diagonal movement
         doors_mask = np.isin(self.features, G.DOORS)
         walkable_diagonally[doors_mask] = False
         return walkable_diagonally
-    
+
     def is_in_bounds(self, x, y):
         return 0 <= x < self.shape[1] and 0 <= y < self.shape[0]
-    
+
     def get_neighbors(self, x, y, include_diagonal=True):
         ret = []
         for dy in [-1, 0, 1]:
@@ -451,7 +475,7 @@ class Level:
                     ret.append((nx, ny))
 
         return ret
-    
+
 class ObservationEventDetector:
     def __init__(self, event_manager: EventManager):
         self.event_manager = event_manager
@@ -471,7 +495,7 @@ class ObservationEventDetector:
 
     def _generate_blstats_events(self, observation):
         old = self.last_blstats
-        new = BLStats(*observation["blstats"])
+        new = make_blstats(observation["blstats"])
 
         # Low Health - We only raise an event when we get below a percentage threshold
         # To avoid wrong messages when raising our max health, we use old.max_hitpoints in both cases to compute the percentage
@@ -496,7 +520,7 @@ class ObservationEventDetector:
                 self.event_manager.handle_event(StatChangeEvent(stat, old_value, new_value))
 
     def _copy_data(self, observation):
-        self.last_blstats = BLStats(*observation["blstats"])
+        self.last_blstats = make_blstats(observation["blstats"])
 
 class Inventory:
     @dataclass
@@ -527,7 +551,7 @@ class Inventory:
             count = {'a': 1, 'an': 1, 'the': 1}.get(count, count)
 
             items[letter] = Inventory.Item(letter, count, name)
-            
+
         return items
 
 class NewGlyphDetector:
@@ -570,7 +594,7 @@ class NewGlyphDetector:
 
             if is_new and not glyph_is_pet(glyph.glyph):
                 self.event_manager.handle_event(NewGlyphEvent(glyph.glyph, glyph.position))
-        
+
         # Remember glyphs for a while
         kept_glyphs = [m for m in self.last_seen_glyphs if (data.blstats.time - m.last_seen) < 10]
         self.last_seen_glyphs = [*kept_glyphs, *updated_glyphs]
@@ -604,14 +628,14 @@ class NethackDataTracker:
         self.event_manager = event_manager
         self.event_detector = ObservationEventDetector(self.event_manager)
         self.glyph_detector = NewGlyphDetector(self.event_manager)
-        
+
         self.blstats = None
         self.last_pray_time = None
         self.levels : Dict[Tuple[int, int], Level] = {}
         self.inventory = Inventory()
 
     def init(self, observation) -> List[NethackEvent]:
-        self.blstats = BLStats(*observation["blstats"])
+        self.blstats = make_blstats(observation["blstats"])
         self.event_detector.init(observation)
         self._update_level(observation)
         self.inventory.init(observation)
@@ -621,8 +645,7 @@ class NethackDataTracker:
     def update(self, action, observation) -> List[NethackEvent]:
         if action == actions.Command.SEARCH:
             self.current_level.search_count[self.blstats.y, self.blstats.x] += 1
-
-        self.blstats = BLStats(*observation["blstats"])
+        self.blstats = make_blstats(observation["blstats"])
         self.event_detector.update(action, observation)
         self._update_level(observation)
         self.inventory.update(action, observation)
@@ -630,7 +653,7 @@ class NethackDataTracker:
 
         if action == actions.Command.PRAY:
             self.last_pray_time = self.blstats.time
-        
+
         return self.event_manager.clear_event_history()
 
     def _update_level(self, observation):

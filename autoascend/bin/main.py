@@ -31,7 +31,8 @@ def prepare_env(args, seed):
             env = gym.make('NetHackChallenge-v0')
             env.seed(seed, seed)
             obs = env.reset()
-            blstats = agent_lib.BLStats(*obs['blstats'])
+            # Use library helper to construct BLStats robustly across NLE versions
+            blstats = agent_lib.make_blstats(obs['blstats'])
             character_glyph = obs['glyphs'][blstats.y, blstats.x]
             if any([nh.permonst(nh.glyph_to_mon(character_glyph)).mname.startswith(role) for role in args.role]):
                 break

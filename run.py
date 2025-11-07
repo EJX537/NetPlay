@@ -7,8 +7,7 @@ from netplay.logging.nethack_monitor import NethackH5PYMonitor
 from netplay.nethack_agent.describe import describe_glyph
 
 from nle_language_wrapper import NLELanguageWrapper
-
-from langchain.chat_models import ChatOpenAI
+from netplay.llm_wrapper import LiteLLMWrapper
 
 from termcolor import colored
 import argparse
@@ -71,7 +70,7 @@ if __name__ == "__main__":
     parser.add_argument('-max_steps', type=int, default=-1, help="The maximum amount of steps until the run will be aborted. Default=-1 indicating no timelimit.")
     parser.add_argument('-seed', type=int, help="The random seed used for this run.")
     parser.add_argument('-log_folder', type=str, default="./runs", help="Folder for storing the run log. Note each run will create a new subfolder in the log folder.")
-    parser.add_argument('-model', type=str, default="gpt-4-1106-preview", help="Choose the OpenAI language model to use. Only used for the llm agent.")
+    parser.add_argument('-model', type=str, default="gpt-4o-mini", help="Model to use (supports any LiteLLM model format, e.g., 'gpt-4o-mini', 'gemini/gemini-pro', 'claude-3-opus'). Only used for the llm agent.")
     parser.add_argument('-max_memory_tokens', type=int, default=500, help="Specify number of tokens the agents memory can hold. Only used for the llm agent.")
     parser.add_argument('--censor_nethack_context', action='store_true', help="Censors any mentions of the word 'NetHack' before passing prompts to the LLM.")
     parser.add_argument('--disable_finish_task_skill', action='store_true', help="Disables the ability of the LLM to finish tasks on its own. ONLY disable this flag for tasks that focus on ending the game.")
@@ -112,11 +111,23 @@ if __name__ == "__main__":
     if args.seed:
         # Seed once after that any reset with seed=None will be deterministic
         env.reset(seed=args.seed)
-    
+
     # Init agent
     if args.agent == "llm":
-        response_format = { "type": "json_object" } if args.model == "gpt-4-1106-preview" else None
-        llm = ChatOpenAI(model=args.model, temperature=0, response_format=response_format, max_retries=0)
+        # Use LiteLLM for all providers - supports 100+ LLM providers with a unified interface
+        # Model format examples:
+        #   OpenAI: "gpt-4o-mini", "gpt-4"
+        #   Anthropic: "claude-3-opus-20240229"
+        #   Google: "gemini/gemini-pro"
+        #   See: https://docs.litellm.ai/docs/providers
+
+        print(f"Initializing LiteLLM with model: {args.model}")
+        llm = LiteLLMWrapper(
+            model=args.model,
+            temperature=0.0,
+            max_retries=0
+        )
+
         agent = create_llm_agent(
             env=env,
             llm=llm,

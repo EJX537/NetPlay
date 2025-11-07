@@ -3,8 +3,8 @@ markupsafe==2.0.1 # Needed for gradio and newer version of this package dont wor
 gym
 gymnasium
 nle
-nle_language_wrapper
-https://github.com/facebookresearch/minihack/archive/main.zip
+nle_language_wrapper==0.2.0
+minihack
 langchain==0.0.352
 langchain-experimental==0.0.47
 langchain-community==0.0.13

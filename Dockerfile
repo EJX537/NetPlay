@@ -1,7 +1,7 @@
 FROM nvcr.io/nvidia/pytorch:20.12-py3
 
 WORKDIR /workspace
-ENV PYTHONPATH "${PYTHONPATH}:/opt/conda/bin/python"
+ENV PYTHONPATH="/opt/conda/bin/python:/Users/eric/Documents/NetPlay/.venv/bin/python3"
 
 # Setup tools for the nethack learning environment
 RUN apt-get update && \

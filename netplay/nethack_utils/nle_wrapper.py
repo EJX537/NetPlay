@@ -130,7 +130,7 @@ class RawKeyPress(enum.IntEnum):
             return RawKeyPress(ord(key))
         elif key.lower() in special_keys:
             return special_keys[key.lower()]
-        
+
         raise ValueError(f"Cannot parse the given key {key}.")
 
 def render_ascii_map(map: np.array, font: ImageFont, is_ascii_map=False) -> np.array:
@@ -162,7 +162,7 @@ class NethackGymnasiumWrapper(Env):
     - **Des-file Loading**: Supports the loading of des-files, in which case a MiniHack environment will be used instead.
     """
 
-    metadata = {'render.modes': ['rgb_array', *NLE.metadata["render.modes"]]}
+    metadata = {'render_modes': ['rgb_array', *NLE.metadata.get("render_modes", [])]}
 
     def __init__(self,
         render_mode="human",
@@ -228,10 +228,32 @@ class NethackGymnasiumWrapper(Env):
     def step(self, action):
         # Did we receive an enum value like CompassDirection.SE? If thats the case map it to the corresponding index
         if isinstance(action, enum.Enum):
-            action = self.env.actions.index(int(action))
+            # Older wrappers expose an `actions` list. Newer NLE exposes ACTIONS via the nethack module.
+            if hasattr(self.env, 'actions'):
+                action = self.env.actions.index(int(action))
+            else:
+                # fallback to the nethack ACTIONS list
+                action = nethack.ACTIONS.index(int(action))
 
-        obs, reward, done, info = self.env.step(action)
-        return obs, reward, done, False, info
+        # The wrapped env may follow either the old Gym API (obs, reward, done, info)
+        # or the Gymnasium API (obs, reward, terminated, truncated, info).
+        result = self.env.step(action)
+
+        # Normalize both possible return signatures into (obs, reward, done, truncated, info)
+        if isinstance(result, tuple):
+            if len(result) == 5:
+                obs, reward, done, truncated, info = result
+            elif len(result) == 4:
+                obs, reward, done, info = result
+                truncated = False
+            else:
+                # Unknown return shape; try to unpack defensively and raise informative error
+                raise ValueError(f"Unsupported step() return shape from wrapped env: expected 4 or 5 elements, got {len(result)}")
+        else:
+            # Unexpected non-tuple result
+            raise ValueError("Unsupported step() return type from wrapped env: expected tuple")
+
+        return obs, reward, done, truncated, info
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed, options=options)
@@ -239,13 +261,25 @@ class NethackGymnasiumWrapper(Env):
         # NLE / Minihack still use the old env.seed() approach
         # seed=None also generates a new random seed which is not controlled by us
         # So easiest way to prevent this is by using our own random generator
-        # As our generator will be deterministic if reset was called with a seed 
+        # As our generator will be deterministic if reset was called with a seed
         if seed is None:
             seed = self.np_random.integers(sys.maxsize)
+        # Ensure seed is a native Python int for downstream gym/gymnasium calls
+        seed = int(seed)
         self.env.seed(core=seed, disp=seed, reseed=False)
 
-        obs = self.env.reset()
-        return obs, {}
+        # Call the wrapped env.reset and accept both legacy (obs) and
+        # Gymnasium-style (obs, info) return signatures. Pass-through
+        # seed/options if provided so the underlying env can use them.
+        result = self.env.reset(seed=seed, options=options) if hasattr(self.env.reset, '__call__') else self.env.reset()
+
+        if isinstance(result, tuple) and len(result) == 2:
+            obs, info = result
+        else:
+            obs = result
+            info = {}
+
+        return obs, info
 
     def render(self):
         if self.render_mode == "rgb_array":
@@ -256,11 +290,11 @@ class NethackGymnasiumWrapper(Env):
     @property
     def waiting_for_yn(self) -> bool:
         return bool(self.env.last_observation[self.env._internal_index][1])
-    
+
     @property
     def waiting_for_line(self) -> bool:
         return bool(self.env.last_observation[self.env._internal_index][2])
-    
+
     @property
     def waiting_for_space(self) -> bool:
         return bool(self.env.last_observation[self.env._internal_index][3])

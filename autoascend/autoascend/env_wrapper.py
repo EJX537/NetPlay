@@ -112,8 +112,9 @@ class EnvWrapper:
 
         agent_lib.G.assert_map(obs['glyphs'], obs['chars'])
 
-        blstats = agent_lib.BLStats(*obs['blstats'])
-        assert obs['chars'][blstats.y, blstats.x] == ord('@')
+    # Build BLStats using agent helper to tolerate different NLE versions
+    blstats = agent_lib.make_blstats(obs['blstats'])
+    assert obs['chars'][blstats.y, blstats.x] == ord('@')
 
         return obs
 
@@ -179,7 +180,7 @@ class EnvWrapper:
                 print('Pop-up :', self.agent.popup)
             print()
             if self.agent is not None and hasattr(self.agent, 'blstats'):
-                print(agent_lib.BLStats(*self.last_observation['blstats']))
+                print(agent_lib.make_blstats(self.last_observation['blstats']))
                 print(f'Carrying: {self.agent.inventory.items.total_weight} / {self.agent.character.carrying_capacity}')
                 print('Character:', self.agent.character)
             print('Misc :', self.last_observation['misc'])

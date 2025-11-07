@@ -11,7 +11,6 @@ import numpy as np
 from nle_language_wrapper import NLELanguageWrapper
 from nle.nethack import actions
 from langchain.schema import AIMessage, HumanMessage, SystemMessage, BaseMessage
-from openai.error import RateLimitError
 
 from typing import Tuple, Dict, Any, List, Optional, Iterator
 from time import sleep
@@ -57,7 +56,7 @@ class AgentMemory:
         size = self.llm.get_num_tokens(message.content)
         if size > self._token_limit:
             raise ValueError(f"The given memory contains {size} tokens, which exceeds the total token limit of {self._token_limit}")
-        
+
         # Remove elements until there is space for the new memory
         while self._token_count + size > self._token_limit:
             self.pop_message()
@@ -116,7 +115,7 @@ class NetHackAgent(NethackBaseAgent):
     def init(self):
         super().init()
         self.message_history.add_system_message(content="Started a new game.")
-    
+
     def _on_game_end(self, step_data: StepData):
         if step_data.info["is_ascended"]:
             # Lol as if I ever need this case
@@ -166,14 +165,17 @@ class NetHackAgent(NethackBaseAgent):
                 strategy = self._skip_more_messages(strategy)
                 strategy = self._update_objects(strategy)
                 yield from strategy
-            except RateLimitError as e:
-                warnings.warn(f"Rate limit reached: {e}")
-                print("Waiting for 1 minute...")
-                sleep(60)
             except Exception as e:
-                warnings.warn(f"A exception occured: {e}")
-                self.logger.log_json(data={"exception": str(e), "with_traceback": traceback.format_exc()}, file_name=EXCEPTION_JSON_LOG_FILE)
-                yield Step.think(f"A exception occured: {e}")
+                # Check if it's a rate limit error (works with any provider)
+                error_msg = str(e).lower()
+                if 'rate' in error_msg and 'limit' in error_msg:
+                    warnings.warn(f"Rate limit reached: {e}")
+                    print("Waiting for 1 minute...")
+                    sleep(60)
+                else:
+                    warnings.warn(f"A exception occured: {e}")
+                    self.logger.log_json(data={"exception": str(e), "with_traceback": traceback.format_exc()}, file_name=EXCEPTION_JSON_LOG_FILE)
+                    yield Step.think(f"A exception occured: {e}")
 
             # Avoid calling the llm forever without making progress
             if current_gamestep == self.blstats.time:
@@ -185,13 +187,13 @@ class NetHackAgent(NethackBaseAgent):
                 current_gamestep = self.blstats.time
                 try_counter = 0
 
-            
+
     def _skip_more_messages(self, generator: Iterator[Step]) -> Iterator[Step]:
         for step in generator:
             yield step
             if step.is_done():
                 return
-            
+
             while self.showing_more_message:
                 yield self.step(RawKeyPress.KEYPRESS_SPACE)
 
@@ -225,11 +227,11 @@ class NetHackAgent(NethackBaseAgent):
                 yield Step(step.status, thoughts, step.thought_type, step.step_data)
                 return
             yield step
-            
+
             if (self.blstats.time - start_ingame_time) >= self.max_skill_gamesteps:
                 yield Step.think(f"Skill has been running for {(self.blstats.time - start_ingame_time)} timesteps without interruption. Rethinking.")
                 return
-            
+
             if step.executed_action():
                 interrupt_event_types = (tracking.DungeonLevelChangeEvent, tracking.TeleportEvent, tracking.NewGlyphEvent, tracking.LowHealthEvent)
                 interrupt_events = [event for event in step.step_data.events if isinstance(event, interrupt_event_types)]
@@ -243,7 +245,7 @@ class NetHackAgent(NethackBaseAgent):
             game_ended = step.executed_action() and step.step_data.done
             if game_ended:
                 break
-            
+
             if step.has_thoughts():
                 if step.thought_type == ThoughtType.System:
                     self.message_history.add_system_message(step.thoughts)
@@ -260,13 +262,13 @@ class NetHackAgent(NethackBaseAgent):
 
     def describe_current_state(self):
         return self.state_descriptor.describe(self)
-    
+
     def describe_action(self, action):
         return NLELanguageWrapper.all_nle_action_map[action][0]
-    
+
     def get_renderer(self):
         return NethackAgentRenderer(self)
-    
+
 import gradio as gr
 from netplay.nethack_utils.nle_wrapper import render_ascii_map
 from minihack.tiles.glyph_mapper import GlyphMapper
@@ -293,20 +295,20 @@ class NethackAgentRenderer(AgentRenderer):
 
     def update(self):
         return [
-            self._get_num_tokens(), 
+            self._get_num_tokens(),
             self._render_rooms(),
             self._render_walkable_map(),
             self._render_diagonal_walkable_map(),
-            #self.agent.memory.concatenate_memories(), 
+            #self.agent.memory.concatenate_memories(),
             "\n".join(reversed(self._get_memory_lines()))
         ]
-    
+
     def _get_memory_lines(self):
         lines = []
         for message in self.agent.message_history.get_messages():
             lines.extend(message.content.split("\n"))
         return lines
-    
+
     def _get_num_tokens(self):
         observation_token_count = self.agent.llm.get_num_tokens(self.agent.describe_current_state())
         return str(observation_token_count)
@@ -318,13 +320,13 @@ class NethackAgentRenderer(AgentRenderer):
             room = level.graph.get_room_data(room_id)
             room_ids[room.get_interior_mask()] = str(room_id)
             room_ids[room.get_exit_mask()] = "E"
-        
+
         #room = level.graph.get_first_room_at(self.agent.blstats.x, self.agent.blstats.y)
         return render_ascii_map(room_ids, self.agent.env.font) #self.mapper._glyph_to_rgb(features)
-    
+
     def _render_walkable_map(self):
         import netplay.nethack_agent.skills as sk
         return render_ascii_map(self.agent.get_walkable_mask().astype("|S1").astype(str), self.agent.env.font)
-    
+
     def _render_diagonal_walkable_map(self):
         return render_ascii_map(self.agent.get_diagonal_walkable_mask().astype("|S1").astype(str), self.agent.env.font)

@@ -53,8 +53,8 @@ Here are some survival tips:
 - You will timeout if you do not make progress for a while. So if something doesn't work on the first try, shift your focus onto something else.
 """
 
-RUN_PY = "/workspaces/nethack_llm/run.py"
-LOG_FOLDER = "/workspaces/nethack_llm/runs"
+RUN_PY = "./run.py"
+LOG_FOLDER = "./runs"
 
 if __name__ == "__main__":
     # Parse args
@@ -96,7 +96,7 @@ if __name__ == "__main__":
 
         print(f"Running {args.agent_name} with seed {seed}.")
         try:
-            os.makedirs(log_folder, exist_ok=True) 
+            os.makedirs(log_folder, exist_ok=True)
 
             process_args = [
                 args.agent,
@@ -119,4 +119,3 @@ if __name__ == "__main__":
                 subprocess.run(["python", RUN_PY, *process_args], stdout=out_file)
         except Exception as e:
             warn(f"Running {args.agent_name} with seed {seed} failed:\n{e}")
-    

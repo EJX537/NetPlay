@@ -15,9 +15,11 @@ DEFAULT_SEEDS = [
     380261
 ]
 
-RUN_PY = "/workspaces/nethack_llm/run.py"
-SCENARIO_FOLDER = "/workspaces/nethack_llm/scenarios"
-LOG_FOLDER = "/workspaces/nethack_llm/runs/scenarios"
+# Use the local repo's run.py and scenarios folder by default
+RUN_PY = os.path.join(os.getcwd(), "run.py")
+SCENARIO_FOLDER = os.path.join(os.getcwd(), "scenarios")
+# Store scenario logs under this repo's runs/scenarios folder by default
+LOG_FOLDER = os.path.join(os.getcwd(), "runs", "scenarios")
 
 @dataclass
 class ScenarioConfig:
@@ -46,13 +48,13 @@ SCENARIO_CONFIGS = [
         additional_args=["-max_steps", "200"]
     ),
     ScenarioConfig(
-        name="unordered", 
+        name="unordered",
         des_file="instructions/unordered.des",
         task="Fulfill all your tasks in any order: drink from the fountain, open both doors, kill the grid bug.",
         additional_args=["-max_steps", "200"]
     ),
     ScenarioConfig(
-        name="bag_of_holding", 
+        name="bag_of_holding",
         des_file="game_mechanics/bag_of_holding.des",
         task="Stuff all objects in this room into a bag.",
         additional_args=["-max_steps", "200"]
@@ -83,49 +85,49 @@ SCENARIO_CONFIGS = [
     ),
     # Seems like my tip doesn't even work most of the time (just results in game message "pardon me, <shopkeeper_name>" but no movement), idk how to resolve this
     #ScenarioConfig(
-    #    name="shop", 
+    #    name="shop",
     #    des_file="game_mechanics/shop.des",
     #    task="Buy something from a shop. To move onto a tile occupied by the shopkeeper next to him and press 'm' followed by a direction. Use the keys 'ykulnjbh' for specifying the directions 'n ne e se s sw w nw'. For example use 'type_text my' to move north without attacking.",
     #    additional_args=["-max_steps", "200"]
     #),
     ScenarioConfig(
-        name="carry", 
+        name="carry",
         des_file="creativity/carry.des",
         task="Drop a plate mail and a iron ball in the room containing the statue.",
         additional_args=["-max_steps", "500"]
     ),
     ScenarioConfig(
-        name="guided_carry", 
+        name="guided_carry",
         des_file="creativity/carry.des",
         task="Drop a plate mail and a iron ball in the room containing the statue. Make sure to first defeat any monster that you encounter. The items are very heavy, only pickup one at a time and use a teleportation wand to teleport yourself with the item.",
         additional_args=["-max_steps", "500"]
     ),
     ScenarioConfig(
-        name="boulder", 
+        name="boulder",
         des_file="creativity/boulder.des",
         task="Find a new room.",
         additional_args=["-max_steps", "500"]
     ),
     ScenarioConfig(
-        name="focused_boulder", 
+        name="focused_boulder",
         des_file="creativity/boulder.des",
         task="Find a new room. If a boulder blocks your path, find a way to remove it.",
         additional_args=["-max_steps", "500"]
     ),
     ScenarioConfig(
-        name="guided_boulder", 
+        name="guided_boulder",
         des_file="creativity/boulder.des",
         task="Find a new room. If a boulder blocks you path remove it using teleportation wands, striking wands, or pickaxes. Note to hit with the wands you have to stand next to the boulder. To use pickaxes you can apply them and specify the direction. (h=west, l=east).",
         additional_args=["-max_steps", "500"]
     ),
     ScenarioConfig(
-        name="escape", 
+        name="escape",
         des_file="creativity/escape.des",
         task="Escape room 0 without using a staircase.",
         additional_args=["-max_steps", "500"]
     ),
     ScenarioConfig(
-        name="hint_escape", 
+        name="hint_escape",
         des_file="creativity/hint_escape.des",
         task="Escape room 0 without using a staircase.", #  If you want to find a wall, move using 'type_text 3l' to move 3 times east or 'type_text 3h' to move 3 times west.
         additional_args=["-max_steps", "500"]

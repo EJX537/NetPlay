@@ -14,14 +14,14 @@ from textwrap import dedent
 from typing import Tuple, Dict, Any, Optional, List
 
 skill_call_schema = {
-    "type": "object",
-    "properties": {
+    "type" : "object",
+    "properties" : {
         "thoughts": {
             "type": "object",
             "properties": {
-                "observations": {"type": "string"},
-                "reasoning": {"type": "string"},
-                "speak": {"type": "string"}
+                "observations": {type: "string"},
+                "reasoning": {type: "string"},
+                "speak": {type: "string"}
             },
             "required": ["observations", "reasoning", "speak"],
             "additionalProperties": False
@@ -29,7 +29,7 @@ skill_call_schema = {
         "skill": {
             "type": "object",
             "properties": {
-                "name": {"type": "string"}
+                "name": {type: "string"},
             },
             "required": ["name"]
         }
@@ -110,7 +110,6 @@ class SkillSelection:
     skill: Skill
     skill_kwargs: Dict[str, Any]
 
-
 def parse_json(json_str: str, skill_repo: SkillRepository) -> Tuple[Optional[Exception], Optional[SkillSelection]]:
     try:
         json_dict = json.loads(json_str)
@@ -122,7 +121,7 @@ def parse_json(json_str: str, skill_repo: SkillRepository) -> Tuple[Optional[Exc
 
     # Verify the skills parameters
     skill_name = json_dict["skill"]["name"]
-    kwargs = {name: value for name, value in json_dict["skill"].items() if name != "name"}
+    kwargs = {name : value for name, value in json_dict["skill"].items() if name != "name"}
     try:
         skill = skill_repo.get_skill(skill_name)
         skill.verify_kwargs(kwargs)
@@ -132,67 +131,12 @@ def parse_json(json_str: str, skill_repo: SkillRepository) -> Tuple[Optional[Exc
     thoughts = Thoughts(**json_dict["thoughts"])
     return None, SkillSelection(thoughts=thoughts, skill=skill, skill_kwargs=kwargs)
 
-
 def construct_prompt(state_description: str, skills: SkillRepository, task: str) -> str:
     return "\n\n".join([
         state_description,
         f"Skills:\n{skills.get_skills_description()}",
         task
     ])
-
-
-class SimpleSkillSelector:
-    def __init__(self,
-        llm,
-        skills: SkillRepository,
-        use_popup_prompt: bool=False
-    ):
-        self.llm = llm
-        self.skills = skills
-        self.use_popup_prompt = use_popup_prompt
-
-    def choose_skill(self, agent: NetHackAgent) -> SkillSelection:
-        if agent.waiting_for_popup() and self.use_popup_prompt:
-            skills = [sk.press_key, sk.type_text]
-            prompt = POPUP_CHOOSE_SKILL_PROMPT
-        else:
-            skills = agent.skills.skills.values()
-            prompt = CHOOSE_SKILL_PROMPT
-
-        if agent.enable_finish_task_skill:
-            skills = [*skills, finish_task_skill]
-
-        return self._internal_choose_skill(agent, SkillRepository(skills), prompt)
-
-    def _internal_choose_skill(self, agent: NetHackAgent, skills: SkillRepository, prompt: str) -> SkillSelection:
-        task_prompt = construct_prompt(agent.describe_current_state(), skills, prompt)
-        messages = [
-            *agent.message_history.get_messages(),
-            SystemMessage(content=task_prompt)
-        ]
-
-        # Censoring
-        if agent.censor_nethack_messages:
-            messages = deepcopy(messages)
-            for m in messages:
-                m.content = m.content.replace("NetHack", "CENSORED")
-
-        # Call and parse
-        json_str = self.llm.predict_messages(messages).content
-        agent.logger.log_json(
-            data={
-                "prompt": messages[-1].content,
-                "response": json_str,
-                "context": [{m.type: m.content} for m in messages[:-1]]
-            },
-            file_name=CHOOSE_SKILL_LOG_FILE
-        )
-
-        error_message, skill_call = parse_json(json_str, skills)
-        if error_message is None:
-            return skill_call
-
-        raise Exception(f"Unable to parse the JSON provided by the LLM. Error message: '{error_message}'.")
 
 
 def render_ascii_map_cropped(agent: NetHackAgent, radius: int) -> str:
@@ -350,9 +294,12 @@ def render_ascii_map_cropped(agent: NetHackAgent, radius: int) -> str:
                 ':': 'lizard (monster glyph)',
                 ';': 'eel / sea monster (monster glyph)',
                 '~': 'worm tail (part of long worm)',
-                "'": "quote (rare symbol)",
+                '\'': 'quote (rare symbol)',
+                '#': 'corridor',
                 'v': 'vortex or monster glyph',
                 'V': 'vampire or monster glyph',
+                '*': 'gem',
+                '"': 'amulet or web',
                 ' ': 'unseen (not observed / out of view)'
             }
 
@@ -414,7 +361,6 @@ def assemble_prompt(agent: NetHackAgent, skills: SkillRepository, task: str, map
         task
     ])
 
-
 def render_tileset_map_cropped(agent: NetHackAgent, radius: int, tile_size: int = 32):
     """Construct a cropped map image (RGB) around the agent using the
     project's tileset and glyph-to-tile mapping. This uses the existing
@@ -435,12 +381,7 @@ def render_tileset_map_cropped(agent: NetHackAgent, radius: int, tile_size: int 
         import numpy as _np
         from minihack.tiles.glyph_mapper import GlyphMapper
         from minihack.tiles import glyph2tile as _glyph2tile
-        try:
-            from netplay.nethack_agent.describe import describe_glyph
-        except Exception:
-            # best-effort fallback
-            def describe_glyph(g):
-                return str(g)
+        from netplay.nethack_agent.describe import describe_glyph
     except Exception:
         return None, "MAP HERE"
 
@@ -470,7 +411,7 @@ def render_tileset_map_cropped(agent: NetHackAgent, radius: int, tile_size: int 
         # Use GlyphMapper's tiles (loaded from tiles.pkl) and the glyph2tile mapping
         try:
             mapper = GlyphMapper()
-            tiles = mapper.tiles  # expected shape: (n_tiles, th, tw, 3) or dict
+            tiles = mapper.tiles  # expected shape: (n_tiles, th, tw, 3)
         except Exception:
             return None, "MAP HERE"
 
@@ -518,11 +459,8 @@ def render_tileset_map_cropped(agent: NetHackAgent, radius: int, tile_size: int 
                 try:
                     canvas[y0:y0 + th, x0:x0 + tw] = tile_img
                 except Exception:
-                    # If shapes mismatch, fill with fallback if available
-                    try:
-                        canvas[y0:y0 + th, x0:x0 + tw] = _np.zeros((th, tw, 3), dtype=dtype)
-                    except Exception:
-                        pass
+                    # If shapes mismatch, fill with fallback
+                    canvas[y0:y0 + th, x0:x0 + tw] = fallback_tile
 
         # Legend only for glyphs present in the cropped region (exclude agent glyph)
         unique_glyphs = sorted(_np.unique(cropped).tolist())
@@ -545,3 +483,6 @@ def render_tileset_map_cropped(agent: NetHackAgent, radius: int, tile_size: int 
         return canvas, legend_text
     except Exception:
         return None, "MAP HERE"
+
+
+
