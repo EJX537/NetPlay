@@ -3,7 +3,7 @@ from netplay.nethack_agent.agent import NetHackAgent, finish_task_skill
 from netplay.core.skill_repository import SkillRepository, Skill
 
 from langchain.prompts import PromptTemplate
-from langchain.schema import SystemMessage, BaseMessage
+from langchain.schema import SystemMessage, HumanMessage, BaseMessage
 
 import json
 import jsonschema
@@ -40,17 +40,17 @@ skill_call_schema = {
 
 CHOOSE_SKILL_PROMPT = dedent("""
 Choose an skill from the given list of skills.
-Output your response in the following JSON format:
+Output your response ONLY as valid JSON in the following format (do not include any text before or after the JSON):
 {
     "thoughts": {
         "observations": "<Relevant observations from your last action. Pay close attention to what you set out to do and compare that to the games current state.>",
         "reasoning": "<Plan ahead.>",
         "speak": "<Summary of thoughts, to say to user>"
-    }
+    },
     "skill": {
         "name": "<The name of the skill>",
         "<param1_name>": "<The value for this parameter>",
-        "<param2_name>": "<The value for this parameter>",
+        "<param2_name>": "<The value for this parameter>"
     }
 }
 """.strip())
@@ -58,17 +58,17 @@ Output your response in the following JSON format:
 POPUP_CHOOSE_SKILL_PROMPT = dedent("""
 Resolve the popup by pressing keys.
 If you want to close the popup abort it using ESC or confirm your choices using enter or space.
-Output your response in the following JSON format:
+Output your response ONLY as valid JSON in the following format (do not include any text before or after the JSON):
 {
     "thoughts": {
         "observations": "<Relevant observations from your last action. Pay close attention to what you set out to do and compare that to the games current state.>",
         "reasoning": "<Plan ahead.>",
         "speak": "<Summary of thoughts, to say to user>"
-    }
+    },
     "skill": {
         "name": "<The name of the skill>",
         "<param1_name>": "<The value for this parameter>",
-        "<param2_name>": "<The value for this parameter>",
+        "<param2_name>": "<The value for this parameter>"
     }
 }
 """.strip())
@@ -112,11 +112,54 @@ class SkillSelection:
 
 
 def parse_json(json_str: str, skill_repo: SkillRepository) -> Tuple[Optional[Exception], Optional[SkillSelection]]:
+    """Parse JSON from LLM response, handling markdown code blocks.
+
+    The LLM may return JSON wrapped in markdown code blocks like:
+    ```json
+    {...}
+    ```
+    Or with text before/after the JSON. This function extracts the JSON.
+    """
+    import re
+
+    # Store original for error reporting
+    original_str = json_str
+
+    # Handle empty or whitespace-only responses
+    if not json_str or not json_str.strip():
+        return "Empty response from LLM", None
+
+    # Try to extract JSON from markdown code block
+    json_match = re.search(r'```(?:json)?\s*\n(.*?)\n```', json_str, re.DOTALL)
+    if json_match:
+        json_str = json_match.group(1)
+    else:
+        # Try to find JSON object boundaries if no code block
+        # Look for the first { and last }
+        start_idx = json_str.find('{')
+        if start_idx != -1:
+            # Find the matching closing brace
+            brace_count = 0
+            for i in range(start_idx, len(json_str)):
+                if json_str[i] == '{':
+                    brace_count += 1
+                elif json_str[i] == '}':
+                    brace_count -= 1
+                    if brace_count == 0:
+                        json_str = json_str[start_idx:i+1]
+                        break
+            else:
+                # No matching closing brace found
+                return f"Incomplete JSON (no closing brace). Response: {original_str[:200]}", None
+        else:
+            # No JSON found at all
+            return f"No JSON object found in response. Response: {original_str[:200]}", None
+
     try:
         json_dict = json.loads(json_str)
         jsonschema.validate(instance=json_dict, schema=skill_call_schema)
     except json.JSONDecodeError as e:
-        return e.msg, None
+        return f"{e.msg} at position {e.pos}. Extracted JSON: {json_str[:200]}", None
     except jsonschema.ValidationError as e:
         return e.message, None
 
@@ -145,11 +188,13 @@ class SimpleSkillSelector:
     def __init__(self,
         llm,
         skills: SkillRepository,
-        use_popup_prompt: bool=False
+        use_popup_prompt: bool=False,
+        map_radius: int=0
     ):
         self.llm = llm
         self.skills = skills
         self.use_popup_prompt = use_popup_prompt
+        self.map_radius = map_radius
 
     def choose_skill(self, agent: NetHackAgent) -> SkillSelection:
         if agent.waiting_for_popup() and self.use_popup_prompt:
@@ -165,10 +210,15 @@ class SimpleSkillSelector:
         return self._internal_choose_skill(agent, SkillRepository(skills), prompt)
 
     def _internal_choose_skill(self, agent: NetHackAgent, skills: SkillRepository, prompt: str) -> SkillSelection:
-        task_prompt = construct_prompt(agent.describe_current_state(), skills, prompt)
+        # Use assemble_prompt (with map) if map_radius > 0, otherwise use construct_prompt
+        if self.map_radius > 0:
+            task_prompt = assemble_prompt(agent, skills, prompt, map_radius=self.map_radius)
+        else:
+            task_prompt = construct_prompt(agent.describe_current_state(), skills, prompt)
+
         messages = [
             *agent.message_history.get_messages(),
-            SystemMessage(content=task_prompt)
+            HumanMessage(content=task_prompt)
         ]
 
         # Censoring
@@ -177,8 +227,24 @@ class SimpleSkillSelector:
             for m in messages:
                 m.content = m.content.replace("NetHack", "CENSORED")
 
+        # Debug: Print the full prompt being sent to LLM
+        import os
+        if os.getenv('DEBUG_LLM_RESPONSES', 'false').lower() in ('true', '1', 'yes'):
+            print(f"\n{'='*80}")
+            print(f"=== LLM PROMPT (Full Message History) ===")
+            print(f"{'='*80}")
+            for i, msg in enumerate(messages):
+                msg_type = type(msg).__name__
+                print(f"\n--- Message {i} ({msg_type}) ---")
+                print(msg.content)
+            print(f"\n{'='*80}")
+            print(f"=== END PROMPT ===")
+            print(f"{'='*80}\n")
+
         # Call and parse
         json_str = self.llm.predict_messages(messages).content
+
+        # Log the full interaction
         agent.logger.log_json(
             data={
                 "prompt": messages[-1].content,
@@ -191,6 +257,14 @@ class SimpleSkillSelector:
         error_message, skill_call = parse_json(json_str, skills)
         if error_message is None:
             return skill_call
+
+        # Log parsing failure with more details
+        import os
+        if os.getenv('DEBUG_LLM_RESPONSES', 'false').lower() in ('true', '1', 'yes'):
+            print(f"\n=== JSON PARSING ERROR ===")
+            print(f"Error: {error_message}")
+            print(f"Raw response: {repr(json_str)}")
+            print(f"=== END ERROR ===\n")
 
         raise Exception(f"Unable to parse the JSON provided by the LLM. Error message: '{error_message}'.")
 
@@ -218,11 +292,23 @@ def render_ascii_map_cropped(agent: NetHackAgent, radius: int) -> str:
         nrows = len(tty)
         ncols = len(tty[0]) if nrows > 0 else 0
 
+        # NetHack terminal layout (typical 24 rows):
+        # Rows 0-1: Message area (game messages)
+        # Row 2: Blank separator
+        # Rows 3-21: Map area
+        # Rows 22-23: Status lines
+        # We only want the map area for the legend (rows 3-21)
+        message_rows = 3  # Skip top 3 rows (message area)
+        status_rows = 2   # Skip bottom 2 rows (status lines)
+        map_start = message_rows
+        map_end = max(message_rows, nrows - status_rows)
+
         agent_row = None
         agent_col = None
         at_code = ord("@")
-        # Search for the '@' glyph in the tty buffer
-        for r_index, row in enumerate(tty):
+        # Search for the '@' glyph in the tty buffer (only in map area)
+        for r_index in range(map_start, map_end):
+            row = tty[r_index]
             for c_index, cell in enumerate(row):
                 try:
                     if int(cell) == at_code:
@@ -235,12 +321,12 @@ def render_ascii_map_cropped(agent: NetHackAgent, radius: int) -> str:
 
         # Fallback to center if not found
         if agent_row is None:
-            agent_row = nrows // 2
+            agent_row = (map_start + map_end) // 2
             agent_col = ncols // 2
 
-        # Compute crop bounds
-        r0 = max(0, agent_row - radius)
-        r1 = min(nrows, agent_row + radius + 1)
+        # Compute crop bounds (limited to map area, excluding messages and status)
+        r0 = max(map_start, agent_row - radius)
+        r1 = min(map_end, agent_row + radius + 1)  # Don't go past map area
         c0 = max(0, agent_col - radius)
         c1 = min(ncols, agent_col + radius + 1)
 
@@ -319,51 +405,56 @@ def render_ascii_map_cropped(agent: NetHackAgent, radius: int) -> str:
             # Authoritative legend mapping based on NetHack Guidebook (section 3)
             # Comprehensive legend mapping based on NetHack Guidebook (section 3)
             # Only entries for glyphs that appear in the cropped map will be shown.
+            # Based on NetHack Guidebook section 3.3 (official documentation)
             legend_map = {
-                '@': 'you',
-                '.': 'floor (room floor, ice, or doorway)',
-                '#': 'corridor (or bars/tree/sink)',
-                '-': 'horizontal wall',
-                '|': 'vertical wall',
-                '+': 'closed door',
-                '<': 'stairs up',
-                '>': 'stairs down',
+                '@': 'you (or another human)',
+                '.': 'floor of a room, ice, or doorless doorway',
+                '#': 'corridor, or iron bars, or tree, or sink, or drawbridge',
+                '-': 'wall of a room, or open door',
+                '|': 'wall of a room, or open door, or grave',
+                '+': 'closed door, or spellbook',
+                '<': 'stairs up (to previous level)',
+                '>': 'stairs down (to next level)',
                 '$': 'pile of gold',
-                '^': 'trap',
+                '^': 'trap (detected)',
                 ')': 'weapon',
-                '[': 'armor',
-                '%': 'edible (food)',
+                '[': 'suit or piece of armor',
+                '%': 'something edible (not necessarily healthy)',
                 '?': 'scroll',
                 '/': 'wand',
                 '=': 'ring',
                 '!': 'potion',
-                '(': 'tool / useful item (pick-axe, key, lamp, etc.)',
-                '"': 'amulet or (web)',
-                '*': 'gem or rock',
+                '(': 'useful item (pick-axe, key, lamp, etc.)',
+                '"': 'amulet or spider web',
+                '*': 'gem or rock (possibly valuable, possibly worthless)',
                 '`': 'boulder or statue',
                 '0': 'iron ball',
-                '_': 'altar or iron chain',
+                '_': 'altar, or iron chain',
                 '{': 'fountain',
-                '}': 'pool of water / lava / moat',
-                '\\': 'throne',
-                ',': 'object on floor (item)',
-                ':': 'lizard (monster glyph)',
-                ';': 'eel / sea monster (monster glyph)',
-                '~': 'worm tail (part of long worm)',
-                "'": "quote (rare symbol)",
-                'v': 'vortex or monster glyph',
-                'V': 'vampire or monster glyph',
-                ' ': 'unseen (not observed / out of view)'
+                '}': 'pool of water or moat or pool of lava',
+                '\\': 'opulent throne',
+                ',': 'item on floor',
+                'I': 'last known location of invisible/unseen monster',
+                ' ': 'unseen (not yet observed / out of view)'
             }
 
+            # Only show legend entries for symbols actually present in the map
             legend_lines = []
+
+            # Check if there are any unmapped letters or numbers in the present set
+            # According to NetHack docs: "Letters and certain other symbols represent
+            # the various inhabitants of the Mazes of Menace"
+            has_unmapped_chars = any(ch not in legend_map for ch in present if ch not in (' ', '\n', '\t'))
+
             for ch in sorted(present):
-                # Letters and many other characters represent monsters/creatures
-                if ch.isalpha():
-                    desc = 'monster/creature'
-                else:
-                    desc = legend_map.get(ch, 'other')
-                legend_lines.append(f"'{ch}': {desc}")
+                if ch in legend_map:
+                    # Show specific description for mapped symbols
+                    desc = legend_map[ch]
+                    legend_lines.append(f"'{ch}': {desc}")
+
+            # Add summary entry for letters and other monster symbols
+            if has_unmapped_chars:
+                legend_lines.append(f"letters (a-z, A-Z) and other symbols: various inhabitants of the Mazes of Menace (monsters)")
 
             # Return cropped map and legend (one entry per line). The agent
             # location annotation is handled by the prompt assembler to avoid

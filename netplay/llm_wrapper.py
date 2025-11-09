@@ -16,10 +16,11 @@ import os
 class LiteLLMWrapper:
     """Wrapper around LiteLLM that provides LangChain-compatible interface."""
 
-    def __init__(self, model: str, temperature: float = 0.0, max_retries: int = 0, **kwargs):
+    def __init__(self, model: str, temperature: float = 0.0, max_retries: int = 0, max_tokens: int = 2048, **kwargs):
         self.model = model
         self.temperature = temperature
         self.max_retries = max_retries
+        self.max_tokens = max_tokens
         self.kwargs = kwargs
 
         # Validate API keys are set for the provider
@@ -59,21 +60,21 @@ class LiteLLMWrapper:
                 model=self.model,
                 messages=litellm_messages,
                 temperature=self.temperature,
+                max_tokens=self.max_tokens,
                 **self.kwargs
             )
 
             # Extract content from response
             content = response.choices[0].message.content
-            
-            # Debug: Print first response to help diagnose issues
-            if not hasattr(self, '_first_response_printed'):
-                print(f"\n=== DEBUG: First LLM Response ===")
+
+            # Debug: Print response to help diagnose issues (can be disabled by setting an env var)
+            if os.getenv('DEBUG_LLM_RESPONSES', 'false').lower() in ('true', '1', 'yes'):
+                print(f"\n=== DEBUG: LLM Response ===")
                 print(f"Model: {self.model}")
-                print(f"Response content: {content[:500] if content else 'None'}")
+                print(f"Response content: {content if content else 'None (empty response!)'}")
                 print(f"=== END DEBUG ===\n")
-                self._first_response_printed = True
-            
-            return AIMessage(content=content)
+
+            return AIMessage(content=content if content else "")
 
         except Exception as e:
             # Re-raise with context

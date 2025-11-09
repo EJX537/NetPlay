@@ -70,7 +70,8 @@ if __name__ == "__main__":
     parser.add_argument('-max_steps', type=int, default=-1, help="The maximum amount of steps until the run will be aborted. Default=-1 indicating no timelimit.")
     parser.add_argument('-seed', type=int, help="The random seed used for this run.")
     parser.add_argument('-log_folder', type=str, default="./runs", help="Folder for storing the run log. Note each run will create a new subfolder in the log folder.")
-    parser.add_argument('-model', type=str, default="gpt-4o-mini", help="Model to use (supports any LiteLLM model format, e.g., 'gpt-4o-mini', 'gemini/gemini-pro', 'claude-3-opus'). Only used for the llm agent.")
+    parser.add_argument('-model', type=str, default="gemini/gemini-2.5-flash", help="Model to use (supports any LiteLLM model format, e.g., 'gemini/gemini-2.5-flash', 'gemini/gemini-2.5-pro', 'gpt-4o-mini', 'claude-3-5-sonnet'). Only used for the llm agent.")
+    parser.add_argument('-max_tokens', type=int, default=2048, help="Maximum number of tokens the LLM can generate in a single response. Only used for the llm agent.")
     parser.add_argument('-max_memory_tokens', type=int, default=500, help="Specify number of tokens the agents memory can hold. Only used for the llm agent.")
     parser.add_argument('--censor_nethack_context', action='store_true', help="Censors any mentions of the word 'NetHack' before passing prompts to the LLM.")
     parser.add_argument('--disable_finish_task_skill', action='store_true', help="Disables the ability of the LLM to finish tasks on its own. ONLY disable this flag for tasks that focus on ending the game.")
@@ -125,7 +126,8 @@ if __name__ == "__main__":
         llm = LiteLLMWrapper(
             model=args.model,
             temperature=0.0,
-            max_retries=0
+            max_retries=0,
+            max_tokens=args.max_tokens
         )
 
         agent = create_llm_agent(
