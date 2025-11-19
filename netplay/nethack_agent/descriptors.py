@@ -19,9 +19,10 @@ DESCRIPTION_INCLUDE_FEATURE_GLYPHS = [
     *G.DRAWBRIDGES,
     *G.IRON_BARS,
     *G.THRONES,
-    *G.GRAVES
+    *G.GRAVES,
+    *G.STATUES
 ]
-    
+
 class StatsDescriptor(Descriptor):
     def __init__(self):
         self.lang = NLELanguageObsv()
@@ -36,7 +37,7 @@ class StatsDescriptor(Descriptor):
             5: "fainted",
             6: "starved"
         }
-         
+
         encumbrance_lookup = {
             0: "unencumbered",
             1: "burdened",
@@ -130,7 +131,7 @@ class NetHackContextDescriptor(Descriptor):
             You are an agent that is playing the rogue-like NetHack.
             Always respond in first person.
             """.strip())
-    
+
 class AgentInformationDescriptor(Descriptor):
     def __init__(self):
         self.lang = NLELanguageObsv()
@@ -145,11 +146,11 @@ class AgentInformationDescriptor(Descriptor):
         Game message '{game_message if game_message else ""}'.
         {pray_message}
         """.strip())
-    
+
 class TaskDescriptor(Descriptor):
     def describe(self, agent: NetHackAgent) -> str:
         return agent.task if agent.task else "Win the game."
-    
+
 class ExplorationStatusDescriptor(Descriptor):
     def describe(self, agent: NetHackAgent) -> str:
         messages = []
@@ -174,20 +175,20 @@ class ExplorationStatusDescriptor(Descriptor):
                 bx, by, blocking_glyph = res
                 if (bx,by) in mentioned_positions:
                     continue
-                
+
                 mentioned_positions.add((bx,by))
                 messages.append(f"{describe.describe_glyph(blocking_glyph)} at {(bx,by)} blocks progress in {room.type} {room_id}.")
 
         if len(messages) == 0:
             return "Nothing to explore, but the game has a lot of hidden passages."
         return "\n".join(messages)
-    
+
     def _is_reachable(self, agent: NetHackAgent, x, y):
         for nx, ny in agent.current_level.get_neighbors(x, y):
             if agent.get_path_to(nx, ny, bump_into_unwalkables=False):
                 return True
         return False
-    
+
     def _get_blocking_glyph(self, agent: NetHackAgent, x, y):
         for nx, ny in agent.current_level.get_neighbors(x, y):
             if agent.current_level.get_feature_glyph(nx, ny) in G.CLOSED_DOORS:
@@ -195,7 +196,7 @@ class ExplorationStatusDescriptor(Descriptor):
             elif agent.current_level.get_object_glyph(nx, ny) in G.BOULDERS:
                 return nx, ny, agent.current_level.get_object_glyph(nx, ny)
         return None
-        
+
 class InventoryDescriptor(Descriptor):
     def __init__(self):
         self.lang = NLELanguageObsv()
@@ -205,7 +206,7 @@ class InventoryDescriptor(Descriptor):
         inv_letters = agent.last_observation["inv_letters"]
         tty_chars = agent.last_observation["tty_chars"]
         return self.lang.text_inventory(inv_strs, inv_letters).decode("latin-1")
-    
+
 class CurrentRoomDescriptor(Descriptor):
     def __init__(self, included_feature_glyphs=DESCRIPTION_INCLUDE_FEATURE_GLYPHS):
         self.included_feature_glyphs = included_feature_glyphs
@@ -226,7 +227,7 @@ class CurrentRoomDescriptor(Descriptor):
             f"{room.type} contains:",
             *tile_descriptions,
         ])
-    
+
     def _describe_tile(self, agent, x, y):
         content_description = self._describe_tile_content(agent, x, y)
         if content_description is None:
@@ -234,14 +235,14 @@ class CurrentRoomDescriptor(Descriptor):
 
         offset_description = describe.offset_to_compass((x - agent.blstats.x, y - agent.blstats.y))
         distance_description = self._describe_distance(agent, x, y)
-        
+
         return f"{content_description} {offset_description} at ({x}, {y}) {distance_description}"
-    
+
     def _describe_exit_tile(self, agent, x, y, current_room_id):
         content_description = self._describe_tile_content(agent, x, y)
         if content_description is None:
             return None
-        
+
         distance_description = self._describe_distance(agent, x, y)
 
         exit_room_id = agent.current_level.graph.get_first_room_at(x, y, ignore_id=current_room_id)
@@ -250,7 +251,7 @@ class CurrentRoomDescriptor(Descriptor):
             return f"exit containing {content_description} {distance_description} at ({x}, {y}). It leads to {exit_room.type} {exit_room_id}."
         else:
             return f"exit containing {content_description} {distance_description} at ({x}, {y}). Unknown where this exit leads to."
-    
+
     def _describe_tile_content(self, agent: NetHackAgent, x, y):
         # Collects the glyphs we want to describe for this tile
         feature_glyph = agent.current_level.get_feature_glyph(x, y)
@@ -265,16 +266,16 @@ class CurrentRoomDescriptor(Descriptor):
         glyphs = [g for g in glyphs if g is not None]
         if len(glyphs) == 0:
             return None
-        
+
         content_description = ','.join([describe.describe_glyph(g) for g in glyphs])
         content_description = f"[{content_description}]"
         return content_description
-    
+
     def _describe_distance(self, agent, x, y):
         distance = agent.distance_to(x, y)
         distance_description = f"reachable in {distance} steps" if distance != -1 else "currently unreachable"
         return distance_description
-    
+
 class OtherRoomsDescriptor(Descriptor):
     def describe(self, agent: NetHackAgent) -> str:
         other_rooms = [room_id for room_id in agent.current_level.graph.get_rooms() if room_id != agent.current_room_id]
@@ -309,7 +310,7 @@ class OtherRoomsDescriptor(Descriptor):
             glyph_descriptions = ", ".join(glyph_descriptions)
             other_room_descriptions.append(f"{room.type} with id {room_id} containing [{glyph_descriptions}] {distance_description}.")
         return "\n".join(other_room_descriptions)
-    
+
 class RoomsObjectFeatureDescriptor(Descriptor):
     """
     You are in (room/corridor) X which contains:
@@ -366,13 +367,13 @@ class RoomsObjectFeatureDescriptor(Descriptor):
         paths = [agent.get_path_to(x, y, bump_into_unwalkables=False) for x, y in room.get_tiles()]
         min_dist = min([len(p) for p in paths if p is not None], default=None)
         return min_dist
-    
+
     def _describe_distance(self, dist):
         if dist is None:
             return "currently unreachable"
         else:
             return f"reachable in {dist} steps"
-        
+
 class CloseMonsterDescriptor(Descriptor):
     """
     (No monsters close to you)
@@ -398,7 +399,7 @@ class CloseMonsterDescriptor(Descriptor):
             return "No monsters close to you"
         else:
             return "\n".join(descriptions)
-    
+
 class DistantMonsterDescriptor(Descriptor):
     """
     (No monsters in the distance)
@@ -417,7 +418,7 @@ class DistantMonsterDescriptor(Descriptor):
                 descriptions.append(f"{describe.describe_glyph(glyph)} at ({pos.x},{pos.y}) currently unreachable")
             elif len(path) - 1 > self.distance_threshold:
                 descriptions.append(f"- {describe.describe_glyph(glyph)} at ({pos.x},{pos.y}) reachable in {len(path) - 1} steps")
-        
+
         if len(descriptions) == 0:
             return "No monsters in the distance"
         else:

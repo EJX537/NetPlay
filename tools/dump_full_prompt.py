@@ -6,12 +6,20 @@ loads the provided `.des` file into a Nethack env, calls `agent.describe_current
 and then assembles the final prompt using the same `construct_prompt` and skills
 repository that `create_llm_agent` uses.
 
-It prints and writes the prompt to `runs/interactive/complete_prompt.txt`.
+It dumps all three prompt variations:
+- No map (original implementation)
+- ASCII map with semantic legend
+- PNG map (currently same as no map, reserved for future image embedding)
+
+Prompts are written to:
+- runs/interactive/prompt_no_map.txt
+- runs/interactive/prompt_ascii_map.txt
+- runs/interactive/prompt_png_map.txt
 """
 import os
 import sys
 
-from netplay import create_llm_agent
+from netplay import create_llm_agent, MapMode
 from netplay.nethack_utils.nle_wrapper import NethackGymnasiumWrapper
 import netplay.nethack_agent.skills as skills_module
 from netplay.core.skill_repository import SkillRepository
@@ -38,13 +46,38 @@ def main():
     os.makedirs(out_dir, exist_ok=True)
 
     des = None
+    map_radius = 20  # Use a larger radius for better visualization
+
     if len(sys.argv) > 1:
         des = sys.argv[1]
     else:
-        print('Usage: dump_full_prompt.py <path/to/file.des>')
+        print('Usage: dump_full_prompt.py <path/to/file.des> [map_radius]')
+        print()
+        print('Generates three prompt variations:')
+        print('  1. No map (original implementation)')
+        print('  2. ASCII map with semantic legend')
+        print('  3. PNG map (reserved for future image embedding)')
+        print()
+        print('Arguments:')
+        print('  <path/to/file.des>  Path to NetHack .des scenario file')
+        print('  [map_radius]        Optional map radius (default=20)')
+        print()
+        print('Example:')
+        print('  python3 tools/dump_full_prompt.py scenarios/game_mechanics/wand.des 15')
+        print()
+        print('Output files:')
+        print('  runs/interactive/prompt_no_map.txt')
+        print('  runs/interactive/prompt_ascii_map.txt')
+        print('  runs/interactive/prompt_png_map.txt')
         return
 
-    # Create env and agent
+    if len(sys.argv) > 2:
+        try:
+            map_radius = int(sys.argv[2])
+        except ValueError:
+            print(f'Warning: Invalid map_radius "{sys.argv[2]}", using default=20')
+
+    # Create env
     env = NethackGymnasiumWrapper(render_mode='human', des_file=des, autopickup=False)
     dummy = DummyLLM()
 
@@ -60,45 +93,88 @@ def main():
         skills_module.type_text,
     ])
 
-    # Build agent with the same descriptors (create a minimal one via create_llm_agent)
-    agent = create_llm_agent(env=env, llm=dummy, memory_tokens=800, log_folder=out_dir, render=False)
+    print(f'Generating prompts for: {des}')
+    print(f'Map radius: {map_radius}')
+    print(f'Output directory: {out_dir}')
+    print('=' * 80)
 
-    # Reset the environment and initialize the agent so descriptors have
-    # access to the latest observation (last_observation).
-    try:
-        obs, info = env.reset()
-    except Exception:
-        # Some wrappers return only obs
+    # Generate prompts for all three map modes
+    modes = [
+        (MapMode.NONE, 'no_map', 'No Map (Original)'),
+        (MapMode.ASCII, 'ascii_map', f'ASCII Map (radius={map_radius})'),
+        (MapMode.PNG, 'png_map', 'PNG Map (reserved for future image embedding)'),
+    ]
+
+    for map_mode, filename_suffix, description in modes:
+        print(f'\n{description}')
+        print('-' * 80)
+
+        # Create agent with specific map mode
+        agent = create_llm_agent(
+            env=env,
+            llm=dummy,
+            memory_tokens=800,
+            log_folder=out_dir,
+            render=False,
+            map_mode=map_mode,
+            map_radius=map_radius
+        )
+
+        # Reset the environment and initialize the agent
         try:
-            obs = env.reset()
+            obs, info = env.reset()
         except Exception:
-            obs = None
+            try:
+                obs = env.reset()
+            except Exception:
+                obs = None
 
-    # Initialize agent (this also sets up memory/messages)
-    try:
-        agent.init()
-    except Exception:
-        pass
+        # Initialize agent
+        try:
+            agent.init()
+        except Exception:
+            pass
 
-    # Describe current state
-    state_description = agent.describe_current_state()
+        # Generate the prompt using the agent's skill selector
+        # This ensures we use the exact same logic as during actual gameplay
+        state_description = agent.describe_current_state()
+        task_text = skill_selection.CHOOSE_SKILL_PROMPT
 
-    # Build skills listing text (same as used by construct_prompt)
-    skills_text = skill_repo.get_skills_description()
+        # Use assemble_prompt_with_map to get the prompt with the appropriate map
+        prompt = skill_selection.assemble_prompt_with_map(
+            agent,
+            skill_repo,
+            task_text,
+            map_mode,
+            map_radius
+        )
 
-    # Use the CHOOSE_SKILL_PROMPT as the task body to exactly replicate the real prompt
-    task_text = skill_selection.CHOOSE_SKILL_PROMPT
+        # Write to file
+        out_path = os.path.join(out_dir, f'prompt_{filename_suffix}.txt')
+        with open(out_path, 'w') as f:
+            f.write(prompt)
 
-    prompt = "\n\n".join([state_description, f"Skills:\n{skills_text}", task_text])
+        print(f'✓ Wrote to: {out_path}')
+        print(f'  Length: {len(prompt)} characters, ~{len(prompt.split())} words')
 
-    out_path = os.path.join(out_dir, 'complete_prompt.txt')
-    with open(out_path, 'w') as f:
-        f.write(prompt)
+        # Show a preview of the map section if present
+        if 'Map:' in prompt or 'Map (' in prompt:
+            map_start = prompt.find('\nMap')
+            if map_start != -1:
+                map_end = prompt.find('\n\n', map_start + 1)
+                if map_end == -1:
+                    map_end = map_start + 500
+                map_preview = prompt[map_start:map_end]
+                # Count lines in map section
+                map_lines = map_preview.count('\n')
+                print(f'  Map section: {map_lines} lines')
 
-    print('Wrote complete prompt to', out_path)
-    print('--- prompt start ---')
-    print(prompt)
-    print('--- prompt end ---')
+    print('\n' + '=' * 80)
+    print('All prompts generated successfully!')
+    print(f'Files written to: {out_dir}/')
+    print('  - prompt_no_map.txt')
+    print('  - prompt_ascii_map.txt')
+    print('  - prompt_png_map.txt')
 
 
 if __name__ == '__main__':

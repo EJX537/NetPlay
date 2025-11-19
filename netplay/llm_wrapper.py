@@ -52,7 +52,53 @@ class LiteLLMWrapper:
         for msg in messages:
             role = self._get_role(msg)
             content = getattr(msg, 'content', str(msg))
-            litellm_messages.append({"role": role, "content": content})
+
+            # Check if message has image data (for vision models)
+            # Image data should be in msg.additional_kwargs['image_data']
+            image_data = getattr(msg, 'additional_kwargs', {}).get('image_data')
+
+            if image_data:
+                # Format for vision models: content becomes a list with text and image
+                litellm_messages.append({
+                    "role": role,
+                    "content": [
+                        {"type": "text", "text": content},
+                        {"type": "image_url", "image_url": {"url": image_data}}
+                    ]
+                })
+            else:
+                litellm_messages.append({"role": role, "content": content})
+
+        # Fix for Gemini: Convert system messages to user messages and merge consecutive user messages
+        # Gemini requires alternating user/assistant and doesn't support system role in the same way
+        if 'gemini' in self.model.lower():
+            # First, convert all system to user
+            for msg in litellm_messages:
+                if msg["role"] == "system":
+                    msg["role"] = "user"
+
+            # Then merge consecutive user messages
+            merged_messages = []
+            for msg in litellm_messages:
+                if merged_messages and merged_messages[-1]["role"] == "user" and msg["role"] == "user":
+                    # Merge with previous user message
+                    prev_content = merged_messages[-1]["content"]
+                    curr_content = msg["content"]
+
+                    # Handle vision content (list format) vs text content (string format)
+                    if isinstance(prev_content, list):
+                        # Previous message has vision content - can't merge, just append
+                        merged_messages.append(msg)
+                    elif isinstance(curr_content, list):
+                        # Current message has vision content - can't merge, just append
+                        merged_messages.append(msg)
+                    else:
+                        # Both are strings, safe to merge
+                        merged_messages[-1]["content"] += "\n\n" + curr_content
+                else:
+                    merged_messages.append(msg)
+
+            litellm_messages = merged_messages
 
         # Call LiteLLM
         try:

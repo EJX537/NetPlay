@@ -39,11 +39,11 @@ agent = create_llm_agent(
     llm=llm,
     memory_tokens=500,
     log_folder=log_folder,
-    render=False
+    render=False,
+    map_mode='ascii',
+    map_radius=20
 )
 
-# Enable ASCII map with larger radius to see more of the level
-agent.skill_selector.map_radius = 20
 print(f"ASCII map enabled with radius: {agent.skill_selector.map_radius}")
 
 agent.init()

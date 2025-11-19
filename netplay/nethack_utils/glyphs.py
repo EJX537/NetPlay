@@ -42,6 +42,9 @@ AIR = [SS.S_air]
 ROCKS = [SS.S_stone]
 POOLS = [SS.S_pool]
 
+# Statues - treat as features since they're static dungeon objects
+STATUES = [nh.GLYPH_STATUE_OFF + i for i in range(nh.NUMMONS)]
+
 FEATURES = [
     *STAIRCASES,
     *LADDERS,
@@ -64,7 +67,8 @@ FEATURES = [
     *LAVA,
     *CLOUD,
     *AIR,
-    *ROCKS
+    *ROCKS,
+    *STATUES
 ]
 
 WALKABLE_FEATURES = [
