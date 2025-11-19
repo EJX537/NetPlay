@@ -73,6 +73,8 @@ if __name__ == "__main__":
     parser.add_argument('-model', type=str, default="gemini/gemini-2.5-flash", help="Model to use (supports any LiteLLM model format, e.g., 'gemini/gemini-2.5-flash', 'gemini/gemini-2.5-pro', 'gpt-4o-mini', 'claude-3-5-sonnet'). Only used for the llm agent.")
     parser.add_argument('-max_tokens', type=int, default=2048, help="Maximum number of tokens the LLM can generate in a single response. Only used for the llm agent.")
     parser.add_argument('-max_memory_tokens', type=int, default=500, help="Specify number of tokens the agents memory can hold. Only used for the llm agent.")
+    parser.add_argument('-map_mode', type=str, default="none", choices=["none", "ascii", "png"], help="Map rendering mode for the LLM agent.")
+    parser.add_argument('-map_radius', type=int, default=20, help="Radius of the map to render for the LLM agent.")
     parser.add_argument('--censor_nethack_context', action='store_true', help="Censors any mentions of the word 'NetHack' before passing prompts to the LLM.")
     parser.add_argument('--disable_finish_task_skill', action='store_true', help="Disables the ability of the LLM to finish tasks on its own. ONLY disable this flag for tasks that focus on ending the game.")
     parser.add_argument('--update_hidden_objects', action='store_true', help="Enable to fix a bug where removed objects would still show up in the environment description.")
@@ -138,7 +140,9 @@ if __name__ == "__main__":
             render=args.render,
             censor_nethack_context=args.censor_nethack_context,
             enable_finish_task_skill=not args.disable_finish_task_skill,
-            update_hidden_objects=args.update_hidden_objects
+            update_hidden_objects=args.update_hidden_objects,
+            map_mode=args.map_mode,
+            map_radius=args.map_radius
         )
     elif args.agent == "handcrafted":
         agent = HandcraftedAgent(

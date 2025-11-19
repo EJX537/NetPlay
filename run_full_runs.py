@@ -72,6 +72,8 @@ if __name__ == "__main__":
     parser.add_argument('--use_guide', default=False, action='store_true', help="When set the agent gets access to a guide for playing the game.")
     parser.add_argument('--use_creative_guide', default=False, action='store_true', help="When set the agent will be tasked to act creative.")
     parser.add_argument('--update_hidden_objects', action='store_true', help="Enable to fix a bug where removed objects would still show up in the environment description.")
+    parser.add_argument('-map_mode', type=str, default="none", choices=["none", "ascii", "png"], help="Map rendering mode.")
+    parser.add_argument('-map_radius', type=int, default=20, help="Radius of the map to render.")
     args = parser.parse_args()
     if args.seeds:
         print("-seeds was set, ignoring -num_runs.")
@@ -105,6 +107,8 @@ if __name__ == "__main__":
                 "-seed", str(seed),
                 "-character", args.role,
                 "-model", args.model,
+                "-map_mode", args.map_mode,
+                "-map_radius", str(args.map_radius),
                 "--keep_log_folder",
                 "--disable_finish_task_skill"
             ]
