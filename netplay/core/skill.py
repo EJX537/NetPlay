@@ -27,7 +27,7 @@ class SkillParameter:
             return value.lower() == "true"
 
         raise ValueError(f"Invalid parameter type {self.type}")
-    
+
     def get_type(self):
         if self.type == SkillParameterType.string:
             return str
@@ -35,7 +35,7 @@ class SkillParameter:
             return int
         if self.type == SkillParameterType.bool:
             return bool
-        
+
         raise ValueError(f"Invalid parameter type {self.type}")
 
     def __str__(self):
@@ -51,18 +51,18 @@ class SkillParameter:
     @classmethod
     def integer(cls, name: str, optional=False):
         return cls(name, SkillParameterType.integer, optional=optional)
-    
+
     @classmethod
     def string(cls, name: str, optional=False):
         return cls(name, SkillParameterType.string, optional=optional)
-    
+
     @classmethod
     def bool(cls, name: str, optional=False):
         return cls(name, SkillParameterType.bool, optional=optional)
 
 class Skill:
     def __init__(self,
-        fn: Callable, 
+        fn: Callable,
         name: str,
         description: str,
         parameters: List[SkillParameter]
@@ -73,7 +73,10 @@ class Skill:
         self.parameters = parameters
 
     def __call__(self, agent, **kwargs) -> Iterator[Step]:
-        yield from self.fn(agent, **kwargs)
+        try:
+            yield from self.fn(agent, **kwargs)
+        except GeneratorExit:
+            pass
 
     def verify_kwargs(self, kwargs: Dict[str, Any]):
         params = {param.name : param for param in self.parameters}
@@ -90,7 +93,7 @@ class Skill:
         for param, value in zip(self.parameters, args):
             parsed_args[param.name] = param.parse(value)
         return parsed_args
-    
+
     def generate_description(self) -> str:
         params = [
             f"{param.name}: {param.type.name if not param.optional else f'Optional[{param.type.name}]'}"
@@ -102,10 +105,13 @@ def skill(name, description, parameters):
     def decorator(skill_fn):
         @wraps(skill_fn)
         def wrapper(agent, *args, **kwargs):
-            yield from skill_fn(agent, *args, **kwargs)
+            try:
+                yield from skill_fn(agent, *args, **kwargs)
+            except GeneratorExit:
+                pass
 
         skill = Skill(
-            fn=skill_fn,
+            fn=wrapper,
             name=name,
             description=description,
             parameters=parameters
